@@ -1,0 +1,13 @@
+# Proto creation map for 'fetched (4).lua' (46 protos captured in the sandbox)
+# from tools/seqs.py on fetched4.protos.json
+
+843620_812768532@1,58717 44 seq range 1 46
+   first 12: [(1, '1'), (2, '5'), (3, '10'), (4, '27'), (5, '26'), (6, 't230'), (7, 't401'), (8, '12'), (9, '25'), (10, '17'), (11, '16'), (12, '2')]
+   big gaps: []
+843620_812768532@1,819070 1 seq range 40 40
+   first 12: [(40, '33')]
+   big gaps: []
+843620_812768532@1,10879 1 seq range 39 39
+   first 12: [(39, '32')]
+   big gaps: []
+runs by seq: [['@1,58717', 1, 38, 38], ['@1,10879', 39, 39, 1], ['1,819070', 40, 40, 1], ['@1,58717', 41, 46, 6]]
