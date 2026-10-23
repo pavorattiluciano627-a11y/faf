@@ -16,7 +16,8 @@ Artifacts in this folder:
 
 * `fetched4_trace.lua` — behaviour trace (what the script actually does when run)
 * `fetched4_strings.txt` — every string the VM decrypted during the run (evidence)
-* `fetched4_devirt.lua` — devirtualized Luau, if the full lift completed (see below)
+* `fetched4_devirt.lua` — devirtualized Luau recovered from the VM (partial lift —
+  22 functions, 13 unlifted blocks; see §4)
 
 ---
 
@@ -97,34 +98,67 @@ Consequences:
   It does not fire here only because the Luarmor signatures are still encrypted
   in this file (the plugin matches the plaintext variant).
 
-## 4. Devirtualization result
+## 4. Devirtualization result — `fetched4_devirt.lua` (partial lift)
 
 The Luraph lifter runs in two stages: capture the VM protos (46 closures,
 512 tables — the two biggest instruction tables are ~1.39 MB and ~0.8 MB of
 JSON) and then symbolically walk them, asking the sandboxed VM to decrypt every
 lazy constant.
 
-* Proto capture: OK → `protos.json` (46 protos).
-* Bootstrap lift: OK → *"Luraph bootstrap: 37 functions from #1 (10.1s)"*.
-* Live constant decryption: **fails** (`live constant request failed`) because the
-  REPL that answers constant requests is the same Luraph VM that is spinning in
-  `while true do wait() end` after the kick — it never returns to the harness's
-  dump/decode loop. The lifter falls back to batch "constant rounds", which
-  re-run the whole 843 KB VM per round. On this 2-core box one full lift needs
-  well over 45 minutes of CPU time, so no `fetched4_devirt.lua` was produced in
-  this session.
+* Proto capture: OK → 46 protos / 512 tables.
+* Bootstrap lift: OK → *"Luraph bootstrap: 37 functions from #1 (~10 s)"*.
+* Live constant decryption: **fails** (`live constant request failed`) — the REPL
+  that answers constant requests *is* the same Luraph VM, and after the failed
+  check it is sitting in `while true do wait() end`; it never returns to the
+  harness's dump/decode loop. The lifter then falls back to batch "constant
+  rounds", which re-run the whole 843 KB VM per round.
+* An unbounded full lift (`DEVIRT_WALK_LIMIT` = 25 000–60 000) did **not finish**
+  here: > 55 min of single-core CPython and still climbing (2 vCPU box, no PyPy).
+* With the per-proto walk capped the lift completes in ~4 min and still recovers
+  most of the loader:
 
-If you want to push it further on a faster machine:
+  | run | walk limit | output | functions | `error("devirt: …")` |
+  |---|---|---|---|---|
+  | kept as `fetched4_devirt.lua` | 8 000 | 2 143 lines / 89 KB | 22 | 13 |
+  | (deeper, dropped) | 14 000 | 1 789 lines / 83 KB | 19 | 13 |
+
+Reproduce exactly:
 
 ```bash
-node deob.js "fetched (4).lua" -o out.lua --debug --timeout 3600 --budget 300 \
-     --devirt-rounds 1            # single full lift, writes output right after
-DEOB_FAST=1 DEVIRT_FULL_ROUNDS=1 DEVIRT_ROUND_BUDGET=3600 \
-DEOB_PYPY=/path/to/pypy3        # PyPy makes the lifter ~2x faster
+DEOB_FAST=1 DEVIRT_FULL_ROUNDS=1 DEVIRT_WALK_LIMIT=8000 \
+node deob.js "fetched (4).lua" -o fetched4_devirt.lua \
+     --debug --timeout 1200 --budget 300 --devirt-rounds 1
 ```
 
-Expect heavy `error("devirt: ...")` markers: the code that only runs after a
-passing check is never reached, so its constants cannot be decoded at all.
+The recovered code is VM-shaped (each lifted function is a `while true do if
+state == N` dispatcher, `upv1[…]` are the VM's tables) but it is real: the check
+routines, the 281-byte error-prompt `loadstring`, the `Kick()` call and the
+string/`bit32`/`buffer` obfuscation lookups are all identifiable, e.g.
+
+```lua
+-- function created 41-th by the script at run time
+local function payload_fn_41()
+    local v = upv3[5069]
+    local v2 = upv3[-3777]
+    loadstring([[local t,r=...spawn(function()while wait()do pcall(function() ...
+        game:GetService("Players").LocalPlayer:Kick(r)]])(v, v2)
+    while upv3[-8382]() do end
+end
+```
+
+`nil` / `if nil then` in the output are **unresolved constants**, not dead code —
+exactly the ones whose decoder is only reachable after a passing check.
+13 `error("devirt: …")` markers remain, all in the giant payload protos.
+
+To go further, use a faster machine (or PyPy — `DEOB_PYPY=…`, ~2× on the Python
+stage) and drop the walk cap:
+
+```bash
+DEOB_FAST=1 DEVIRT_FULL_ROUNDS=1 DEVIRT_BLOCK_STALL=8 \
+DEOB_PYPY=/path/to/pypy3 \
+node deob.js "fetched (4).lua" -o out.lua --debug --timeout 3600 --budget 300 \
+     --devirt-rounds 1
+```
 
 ## 5. Safety verdict
 
