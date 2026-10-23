@@ -1,0 +1,4 @@
+# intermediate deobfuscation run files (large, regenerable)
+out/
+*.protos.json
+*.cfg.json
